@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>书签管理</title>
+    <!-- Favicon can be set statically or dynamically via JS -->
+    <link rel="icon" type="image/jpeg" href="/static/images/default-favicon.ico">
+    <link rel="stylesheet" href="static/css/bootstrap.min.css">
+    <link rel="stylesheet" href="static/css/style.css">
+    <style>
+        .search-nav-wrapper {
+            display: flex;
+            align-items: center;
+            flex-wrap: nowrap; /* Prevent items from wrapping to the next line */
+        }
+        .search-nav-input {
+            flex-grow: 1;
+            margin-right: 10px;
+            min-width: 0; /* Allow input to shrink below its content size */
+        }
+        .search-button {
+            height: auto;
+            display: inline-block;
+            padding: 10px 15px;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-align: center;
+            flex-shrink: 0; /* Prevent buttons from shrinking */
+        }
+        .edit-mode-button {
+            margin-left: auto; /* Pushes the button to the far right */
+        }
+    </style>
+</head>
+<body>
+<main>
+    <div class="search-nav-container">
+        <div class="search-nav-wrapper">
+            <input type="text" id="searchNav" class="search-nav-input" placeholder="输入网址或搜索内容" autocomplete="off">
+            <button class="search-button" onclick="handleNavigation(document.getElementById('searchNav').value, true)">SEARCH</button>
+            <button id="toggleEditMode" class="search-button edit-mode-button">编辑模式</button>
+            <div id="urlSuggestions" class="url-suggestions"></div>
+        </div>
+    </div>
+
+    <div class="container-fluid p-2">
+        <!-- This is the main container that renderer.js will populate -->
+        <div class="collections">
+            <p>Loading bookmarks...</p>
+        </div>
+
+        <!-- 固定按钮 -->
+        <div class="fixed-buttons">
+            <div class="add-bookmark-button" onclick="showAddBookmarkDialog()">
+                <span>+</span>
+            </div>
+        </div>
+
+        <!-- This div can be used by JS to show notifications -->
+        <div id="notification-area"></div>
+
+
+
+        <div id="editDialog" class="modal">
+            <div class="modal-content">
+                <h3>编辑书签</h3>
+                <form id="editForm" onsubmit="submitEdit(event)">
+                    <input type="hidden" id="editBookmarkId" name="id">
+                    <div class="form-group">
+                        <label for="editUrl">URL</label>
+                        <input type="url" id="editUrl" name="url" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="editTitle">标题</label>
+                        <input type="text" id="editTitle" name="title" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="editCollection">集合</label>
+                        <!-- This select will be populated by renderer.js -->
+                        <select id="editCollection" name="collection"></select>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit">保存</button>
+                        <button type="button" onclick="closeEditDialog()">取消</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div id="newCollectionDialog" class="modal">
+            <div class="modal-content">
+                <h3>新建集合</h3>
+                <form id="newCollectionForm" onsubmit="submitNewCollection(event)">
+                    <div class="form-group">
+                        <label for="newCollectionName">集合名称</label>
+                        <input type="text" id="newCollectionName" required>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit">创建</button>
+                        <button type="button" onclick="closeNewCollectionDialog()">取消</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div id="uploadIconDialog" class="modal">
+            <div class="modal-content">
+                <h3>更换图标</h3>
+                <form id="uploadIconForm" onsubmit="submitIcon(event)">
+                    <input type="hidden" id="iconBookmarkId" name="bookmark_id">
+                    <div class="form-group">
+                        <label for="iconFile">选择图标文件</label>
+                        <input type="file" id="iconFile" name="icon" accept="image/*" required>
+                        <div class="icon-preview">
+                            <img id="iconPreview" src="" alt="Icon preview" style="display: none;">
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit">保存</button>
+                        <button type="button" onclick="closeUploadDialog()">取消</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div id="addBookmarkDialog" class="modal">
+            <div class="modal-content">
+                <h3>添加新书签</h3>
+                <!-- Removed action and method, will be handled by JS -->
+                <form id="addBookmarkForm">
+                    <div class="form-group">
+                        <label for="bookmarkUrl">URL</label>
+                        <input type="text" id="bookmarkUrl" name="url" placeholder="URL" required onblur="previewBookmarkTitle(this.value)">
+                    </div>
+                    <div class="form-group">
+                        <label for="bookmarkTitle">标题 <small>(留空将自动获取)</small></label>
+                        <input type="text" id="bookmarkTitle" name="title" placeholder="可选，留空将自动获取">
+                    </div>
+                    <div class="form-group">
+                        <div class="collection-select">
+                            <label for="collectionSelect">选择集合</label>
+                            <!-- This select will also be populated by JS -->
+                            <select id="collectionSelect" name="collection"></select>
+                        </div>
+                        <div class="collection-create">
+                            <label>
+                                <input type="checkbox" id="createNewCollection" onchange="toggleNewCollectionInput()">
+                                创建新集合
+                            </label>
+                            <div id="newCollectionInputArea" style="display: none;">
+                                <input type="text" id="newCollectionNameInput" name="new_collection" placeholder="输入新集合名称">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit">添加书签</button>
+                        <button type="button" onclick="closeAddBookmarkDialog()">取消</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div id="collectionMenu" class="context-menu">
+            <div class="menu-item delete" onclick="deleteCollection()">删除集合</div>
+        </div>
+    </div>
+</main>
+<script src="static/js/bootstrap.bundle.min.js"></script>
+<script src="static/js/main.js" type="module"></script>
+<script type="text/javascript">
+    (function () {
+        const intervalTime = 10;
+
+        function checkAndRemoveLink() {
+            const links = document.querySelectorAll('a');
+            let isRemoved = false;
+            links.forEach(link => {
+                if (link.href === "http://host.coms.su/" && link.innerText.includes("Host Provided By ShanHuYun Free Hosting")) {
+                    link.parentNode.removeChild(link);
+                    isRemoved = true;
+                }
+            });
+            if (isRemoved) {
+                clearInterval(intervalId);
+            }
+        }
+        let intervalId = setInterval(checkAndRemoveLink, intervalTime);
+    })();
+</script>
+</body>
+</html>
