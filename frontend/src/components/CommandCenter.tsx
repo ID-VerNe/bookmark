@@ -11,17 +11,46 @@ interface Props {
 }
 
 const SEARCH_ENGINES = {
-  google: { prefixes: ['?gg ', '？gg '], url: 'https://www.google.com/search?q=', label: 'Google' },
-  googleai: { prefixes: ['?gw ', '？gw '], url: 'https://www.google.com/search?udm=50&q=', label: 'Google AI' },
-  baidu: { prefixes: ['?bd ', '？bd ', '?', '？'], url: 'https://www.baidu.com/s?wd=', label: '百度' },
-  bing: { prefixes: ['?bi ', '？bi '], url: 'https://www.bing.com/search?q=', label: '必应' },
+  baidu: { prefixes: ['?bd ', '？bd '], url: 'https://www.baidu.com/s?wd=', label: '百度' },
+  github: { prefixes: ['?gh ', '？gh ', '?gh', '？gh'], url: 'https://github.com/search?q=', label: 'GitHub' },
+  translate: { prefixes: ['?fy ', '？fy ', '?fy', '？fy'], url: 'https://fanyi.baidu.com/mtpe-individual/transText?lang=en2zh&query=', label: '翻译' },
+  google: { prefixes: ['? ', '？ ', '?', '？'], url: 'https://www.google.com/search?q=', label: 'Google' },
+  googleai: { prefixes: [], url: 'https://www.google.com/search?udm=50&q=', label: 'Google AI' },
+};
+
+// 常见顶级域名 (TLD) 列表，用于增强网址识别
+const COMMON_TLDS = new Set(['com', 'cn', 'net', 'org', 'io', 'me', 'edu', 'gov', 'app', 'dev', 'sh', 'top', 'xyz', 'info', 'tv', 'link', 'icu', 'vip', 'fun', 'site', 'club', 'online', 'space', 'shop', 'store', 'blog', 'art', 'me', 'io', 'ai', 'co', 'ca', 'jp', 'kr', 'uk', 'de', 'fr', 'ru', 'it', 'es', 'br', 'au', 'in', 'sg', 'hk', 'tw', 'mo', 'work', 'tech', 'cloud', 'design', 'pub', 'live', 'video', 'news', 'world', 'today', 'life', 'cool', 'link', 'click', 'help', 'pics', 'photo', 'game', 'games', 'play', 'run', 'win', 'bet', 'bid', 'one', 'plus', 'pro', 'biz', 'mobi', 'name', 'tel', 'asia', 'travel', 'museum', 'coop', 'aero', 'jobs', 'post', 'gov', 'edu', 'mil', 'int', 'arpa']);
+
+const isOmniboxUrl = (input: string) => {
+  const trimmed = input.trim();
+  if (!trimmed || trimmed.includes(' ')) return false; // 含有空格的一律视为搜索词
+  
+  // 1. 协议头匹配
+  if (/^https?:\/\//i.test(trimmed)) return true;
+  
+  // 2. 内网和本地识别
+  if (trimmed.startsWith('localhost') || trimmed.startsWith('127.0.0.1')) return true;
+  if (/^(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(trimmed)) return true; // IP 地址识别
+  if (/:[0-9]+$/.test(trimmed)) return true; // 含有端口号，如 my-server:8080
+  
+  // 3. 域名结构和 TLD 校验
+  const parts = trimmed.split('.');
+  if (parts.length >= 2) {
+    const lastPart = parts[parts.length - 1].toLowerCase();
+    // 如果最后一个部分是已知的常用 TLD，或者是 2-6 位的纯字母（涵盖绝大多数长 TLD）
+    if (COMMON_TLDS.has(lastPart) || /^[a-z]{2,6}$/.test(lastPart)) {
+      return true;
+    }
+  }
+  
+  return false;
 };
 
 const HISTORY_KEY = 'search_url_history';
 
 const normalizeUrl = (url: string) => {
   try {
-    const u = new URL(url.toLowerCase());
+    const u = new URL(url.toLowerCase().startsWith('http') ? url : `https://${url}`);
     return (u.hostname + u.pathname + u.search).replace(/\/$/, '').trim();
   } catch (e) {
     return url.toLowerCase().trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
@@ -56,7 +85,6 @@ export const CommandCenter: React.FC<Props> = ({ bookmarks, onNavigate }) => {
       const title = bm.title.toLowerCase();
       const cleanTitle = title.replace(/[^\u4e00-\u9fa5a-z0-9]/g, '');
       
-      // 关键修复：使用 'first' 模式获取首字符 (c)，而不是 'initial' 模式获取声母 (ch)
       const pinyinFull = pinyin(cleanTitle, { toneType: 'none' }).replace(/\s/g, '');
       const pinyinFirst = pinyin(cleanTitle, { pattern: 'first', toneType: 'none' }).replace(/\s/g, '');
       
@@ -65,19 +93,27 @@ export const CommandCenter: React.FC<Props> = ({ bookmarks, onNavigate }) => {
       return {
         ...bm,
         searchIndex,
-        pinyinFirst, // 调试用
+        pinyinFirst,
         normUrl: normalizeUrl(bm.url)
       };
     });
-    console.log(`[Search Index] Indexed ${items.length} bookmarks in ${Math.round(performance.now() - start)}ms`);
     return items;
   }, [bookmarks]);
 
   const searchContext = useMemo(() => {
     const input = query.trim();
+    // 按照配置顺序匹配，确保 ?bd 优先于 ?
     for (const [key, engine] of Object.entries(SEARCH_ENGINES)) {
+      if (!engine.prefixes || engine.prefixes.length === 0) continue;
       for (const prefix of engine.prefixes) {
-        if (input.startsWith(prefix)) return { engine: key, label: engine.label, query: input.slice(prefix.length).trim(), url: engine.url };
+        if (input.startsWith(prefix)) {
+          return { 
+            engine: key, 
+            label: engine.label, 
+            query: input.slice(prefix.length).trim(), 
+            url: engine.url 
+          };
+        }
       }
     }
     return null;
@@ -88,7 +124,6 @@ export const CommandCenter: React.FC<Props> = ({ bookmarks, onNavigate }) => {
     const rawSearch = query.toLowerCase().trim();
     if (!rawSearch || (searchContext && searchContext.query)) return [];
 
-    console.group(`[Search Debug] Query: "${rawSearch}"`);
     const resultsMap = new Map<string, any>();
 
     // A. 书签匹配
@@ -96,35 +131,26 @@ export const CommandCenter: React.FC<Props> = ({ bookmarks, onNavigate }) => {
       if (bm.searchIndex.includes(rawSearch)) {
         const key = bm.normUrl;
         const existing = resultsMap.get(key);
-        // 如果重复，保留 ID 较小或点击量较高的
         if (!existing || (bm.click_count > (existing.click_count || 0))) {
           resultsMap.set(key, bm);
         }
       }
     });
-    console.log(`Matched Bookmarks: ${resultsMap.size}`);
 
-    // B. 历史记录匹配 (不覆盖已有的书签)
-    let historyCount = 0;
+    // B. 历史记录匹配
     history.forEach(url => {
       const norm = normalizeUrl(url);
       if (!resultsMap.has(norm) && url.toLowerCase().includes(rawSearch)) {
         resultsMap.set(norm, { url, isHistory: true });
-        historyCount++;
       }
     });
-    console.log(`Matched History: ${historyCount}`);
 
-    const finalResults = Array.from(resultsMap.values())
+    return Array.from(resultsMap.values())
       .sort((a, b) => {
         if (a.isHistory !== b.isHistory) return a.isHistory ? 1 : -1;
         return (b.click_count || 0) - (a.click_count || 0);
       })
       .slice(0, 12);
-
-    console.log('Final Results:', finalResults);
-    console.groupEnd();
-    return finalResults;
   }, [query, indexedBookmarks, history, searchContext]);
 
   const internalNavigate = (target: any) => {
@@ -145,20 +171,28 @@ export const CommandCenter: React.FC<Props> = ({ bookmarks, onNavigate }) => {
         setSelectedIndex(prev => (prev - 1 + (searchResults.length || 1)) % (searchResults.length || 1));
       } else if (e.key === 'Enter') {
         e.preventDefault();
+        
+        // 1. 如果有显式搜索前缀，直接跳转搜索
         if (searchContext && searchContext.query) {
           internalNavigate(`${searchContext.url}${encodeURIComponent(searchContext.query)}`);
           return;
         }
+
+        // 2. 如果选中了搜索结果（书签或历史），跳转
         if (searchResults.length > 0 && searchResults[selectedIndex]) {
           internalNavigate(searchResults[selectedIndex]);
           return;
         }
+
+        // 3. 处理直接输入
         const trimmed = query.trim();
         if (trimmed) {
-          if (trimmed.includes('.') && !trimmed.includes(' ')) {
+          if (isOmniboxUrl(trimmed)) {
+            // 判定为网址，直接跳转
             internalNavigate(trimmed.startsWith('http') ? trimmed : `https://${trimmed}`);
           } else {
-            internalNavigate(`${SEARCH_ENGINES.baidu.url}${encodeURIComponent(trimmed)}`);
+            // 默认兜底：Google AI 搜索
+            internalNavigate(`${SEARCH_ENGINES.googleai.url}${encodeURIComponent(trimmed)}`);
           }
         }
       } else if (e.key === 'Escape') {
